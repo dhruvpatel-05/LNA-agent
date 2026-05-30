@@ -1,0 +1,204 @@
+{
+  "version": "1.0",
+  "initialized": "2026-05-29",
+  "title": "News-Conditional Intraday Alpha: LLM Sentiment + LOB Microstructure vs. Loughran-McDonald Lexicon",
+  "primary_hypothesis": "LLM sentiment scores on news headlines combined with LOBSTER OFI and depth thinning produces higher out-of-sample IC than Loughran-McDonald lexicon sentiment alone, across 10 large-cap S&P 500 names at 1/5/15 minute horizons.",
+  "target_venues": ["JFE", "RFS", "Journal of Finance", "Management Science"],
+  "status": "under_investigation",
+  "exploratory_mode": false,
+
+  "claim_graph": {
+    "observations": [
+      {
+        "id": "O1",
+        "claim": "LM sentiment on news headlines has high vocabulary miss-rate (~40-60% zero-signal events) due to calibration on 10-K filings, not short-form text.",
+        "status": "admitted",
+        "evidence_type": "grounded",
+        "source": "Loughran & McDonald (2011); training knowledge"
+      },
+      {
+        "id": "O2",
+        "claim": "LOBSTER OFI at 1-minute bars is positively correlated with contemporaneous and forward mid-quote returns for liquid large-cap NASDAQ names.",
+        "status": "admitted",
+        "evidence_type": "grounded",
+        "source": "Cont, Kukanov & Stoikov (2014)"
+      },
+      {
+        "id": "O3",
+        "claim": "Depth thinning (withdrawal of resting limit orders) on the ask side precedes upward directional moves by 10-60 seconds.",
+        "status": "admitted",
+        "evidence_type": "grounded",
+        "source": "Lehalle & Laruelle (2013); microstructure literature"
+      },
+      {
+        "id": "O4",
+        "claim": "LLM-class models (GPT-4o, FinBERT) achieve higher classification accuracy than LM on financial news sentiment benchmarks (FPB, FiQA SA).",
+        "status": "admitted",
+        "evidence_type": "grounded",
+        "source": "Lopez-Lira & Tang (2023); Koa et al. (2024) — citations unverified"
+      }
+    ],
+    "explanations": [
+      {
+        "id": "E1",
+        "claim": "LM zero-signal events dilute rank IC by inflating ties at zero, biasing Spearman correlation toward zero.",
+        "status": "admitted",
+        "depends_on": ["O1"],
+        "evidence_type": "grounded"
+      },
+      {
+        "id": "E2",
+        "claim": "LLMs capture negation, implicit sentiment, and domain-specific context that LM word lists miss, yielding higher signal-to-noise on headlines.",
+        "status": "admitted",
+        "depends_on": ["O4"],
+        "evidence_type": "grounded"
+      },
+      {
+        "id": "E3",
+        "claim": "OFI is a revealed-preference signal from informed traders; it is mechanically predictive but uninformative about the cause of directional pressure.",
+        "status": "admitted",
+        "depends_on": ["O2"],
+        "evidence_type": "grounded"
+      },
+      {
+        "id": "E4",
+        "claim": "Depth thinning reflects market-maker adverse selection concerns; it leads OFI by seconds and is therefore an earlier predictor of price moves.",
+        "status": "admitted",
+        "depends_on": ["O3"],
+        "evidence_type": "grounded"
+      }
+    ],
+    "exploitations": [
+      {
+        "id": "X1",
+        "claim": "A composite signal combining LLM sentiment, multi-level OFI, and depth thinning asymmetry achieves higher out-of-sample IC than LM-only at 1/5/15 min horizons.",
+        "status": "under_investigation",
+        "depends_on": ["E1", "E2", "E3", "E4"],
+        "evidence_type": "derived",
+        "blocker": "Phase 3 IC evaluation with DM test — not yet run"
+      },
+      {
+        "id": "X2",
+        "claim": "The interaction term (LLM sentiment direction × OFI sign agreement) carries incremental IC beyond the additive combination of the two signals.",
+        "status": "proposed",
+        "depends_on": ["E2", "E3"],
+        "evidence_type": "derived",
+        "blocker": "Phase 3 interaction regression — not yet designed"
+      }
+    ],
+    "justifications": [
+      {
+        "id": "J1",
+        "claim": "Spearman IC is the appropriate evaluation metric: it is robust to heavy tails in intraday returns and standard in practitioner factor research (Grinold & Kahn).",
+        "status": "admitted",
+        "evidence_type": "grounded",
+        "source": "Grinold & Kahn (2000)"
+      },
+      {
+        "id": "J2",
+        "claim": "Diebold-Mariano test is appropriate for comparing time-series IC sequences, accounting for autocorrelation via HAC standard errors.",
+        "status": "admitted",
+        "evidence_type": "grounded",
+        "source": "Diebold & Mariano (1995)"
+      },
+      {
+        "id": "J3",
+        "claim": "Multi-level OFI dominates single-level (best bid/ask) OFI for return prediction at 1-5 minute horizons.",
+        "status": "proposed",
+        "evidence_type": "grounded",
+        "blocker": "Xu et al. citation unverified — needs literature confirmation"
+      }
+    ]
+  },
+
+  "bridges": [
+    {
+      "id": "B1",
+      "from": "O4",
+      "to": "X1",
+      "gap": "LLM superiority on sentiment benchmarks (daily/long-horizon) may not transfer to intraday (1-min) where microstructure noise dominates.",
+      "severity": "high",
+      "mitigation": "Measure IC separately at each horizon; expect stronger LLM advantage at 5/15 min than 1 min."
+    },
+    {
+      "id": "B2",
+      "from": "O3",
+      "to": "X1",
+      "gap": "Depth thinning after news arrival may be a consequence of the price move rather than a predictor — reverse causality risk.",
+      "severity": "medium",
+      "mitigation": "Use only depth thinning measured strictly before the news timestamp (pre-announcement LOB state)."
+    },
+    {
+      "id": "B3",
+      "from": "X1",
+      "to": "publication",
+      "gap": "10 stocks is a small cross-section; IC estimates will have wide confidence intervals and DM test may be underpowered.",
+      "severity": "medium",
+      "mitigation": "Report per-stock IC with bootstrap CIs; frame as existence proof, not universal claim."
+    }
+  ],
+
+  "data_requirements": {
+    "universe": ["AAPL", "MSFT", "AMZN", "GOOGL", "META", "NVDA", "TSLA", "CSCO", "INTC", "CMCSA"],
+    "lob_source": "LOBSTER (Humboldt University Berlin)",
+    "lob_levels": 10,
+    "lob_period": "2022-01-01 to 2023-12-31",
+    "news_source": "TBD — requires millisecond-precision timestamps (Refinitiv/LSEG, Bloomberg, Benzinga)",
+    "horizons_minutes": [1, 5, 15],
+    "sentiment_models": ["Loughran-McDonald word lists", "FinBERT", "GPT-4o zero-shot"]
+  },
+
+  "experiment_plan": [
+    {
+      "tier": 0,
+      "id": "T0-1",
+      "description": "Verify OFI formula implementation on 1-day LOBSTER sample for AAPL; check IC against mid-quote return.",
+      "status": "pending",
+      "expected_runtime": "< 60s"
+    },
+    {
+      "tier": 1,
+      "id": "T1-1",
+      "description": "Compute OFI and depth thinning features for all 10 names over 2022 Q1. Measure IC at 1/5/15 min. Baseline check.",
+      "status": "pending",
+      "expected_runtime": "~1 hour"
+    },
+    {
+      "tier": 1,
+      "id": "T1-2",
+      "description": "Score 2022 Q1 news headlines with LM and FinBERT. Measure headline-level IC at 1/5/15 min. Compare LM vs FinBERT IC.",
+      "status": "pending",
+      "expected_runtime": "~2 hours"
+    },
+    {
+      "tier": 2,
+      "id": "T2-1",
+      "description": "Full 2-year evaluation: composite signal IC vs LM-only IC. DM test at each horizon. Interaction term test.",
+      "status": "pending",
+      "expected_runtime": "~8 hours"
+    },
+    {
+      "tier": 2,
+      "id": "T2-2",
+      "description": "Robustness: sub-sample by VIX regime, news category (earnings/macro/analyst/M&A), time of day.",
+      "status": "pending",
+      "expected_runtime": "~4 hours"
+    }
+  ],
+
+  "convergence": {
+    "core_claim_coverage": 0.0,
+    "admitted_claims": 6,
+    "total_claims": 11,
+    "under_investigation": 1,
+    "proposed": 4,
+    "primary_blocker": "No experimental IC measurements yet — all exploitation claims are proposed or under_investigation",
+    "estimated_cycles_to_convergence": 4
+  },
+
+  "budget": {
+    "llm_scoring_estimated_cost_usd": "~$15 per 10k headlines (GPT-4o); ~$0 for FinBERT",
+    "lobster_data_cost": "Varies — academic access may be free; commercial ~$500-2000",
+    "total_estimated_usd": "< $100 for LLM API if FinBERT used as primary"
+  }
+}
