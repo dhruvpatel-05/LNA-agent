@@ -1,0 +1,9 @@
+anthropic>=0.100.0
+matplotlib>=3.9
+numpy>=1.26
+pandas>=2.0
+pyarrow>=14.0
+python-dotenv>=1.0
+requests>=2.31
+scipy>=1.13
+statsmodels>=0.14
