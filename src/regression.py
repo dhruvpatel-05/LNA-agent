@@ -6,135 +6,151 @@ Model:
   r_{t+h} = a + g*OFI + d1*sent_pos + d2*sent_neg
             + b_pos*(OFI*sent_pos) + b_neg*(OFI*sent_neg) + e
 
-Separate windows: OFI over [t, t+delta], return over [t+delta, t+delta+h].
-sent_pos = max(sent, 0), sent_neg = min(sent, 0)  (hinge split)
-Newey-West HAC SEs for overlapping return labels.
-Cluster-robust variants clustered by event and by day.
-Wald test: H0: b_pos == b_neg.
+Resolved column mapping (from inspection of aligned panel):
+  OFI z-score column     : "ofi_z"
+  Return columns         : "ret_1m", "ret_5m", "ret_15m"  (suffix = {h}m)
+  Primary scorer         : "llm_score"  (robustness: "lm_score", "finbert_score")
+  Day grouping column    : "bar_time"   (falls back to "timestamp")
+  Ticker column          : "stock"      (not "ticker")
+
+delta=0: ofi_z is pre-computed from the bar immediately preceding the headline,
+so the OFI and return windows do not overlap by construction.  No raw-LOB
+recompute is needed at delta=0.
+
+delta>0: return window shifts to [bar_time+delta, bar_time+delta+h]; ofi_z
+remains the pre-headline bar.  This requires recomputing returns from the raw LOB
+midprice — wired when available.
+TODO(schema): delta>0 return shift requires raw LOB midprice; not yet wired.
+
+Newey-West HAC SEs (lags per Newey-West 1994).
+Cluster-robust variants: by event (each row) and by calendar day.
+Wald test: H0: b_pos == b_neg  (tone symmetry).
 """
 
 import numpy as np
 import pandas as pd
-import statsmodels.api as sm
-from statsmodels.stats.sandwich_covariance import cov_hac
+from scipy.stats import t as t_dist
 from statsmodels.regression.linear_model import OLS
 
-# Panel column names — verified from align.py output schema
-_OFI_COL  = "ofi_z"           # normalised OFI z-score
-_TS_COL   = "timestamp"       # event timestamp
-_DAY_COL  = "bar_time"        # LOB bar timestamp (used to derive date group)
-
-# TODO(schema): OFI over [t, t+delta] window — the current panel stores a
-#   single pre-computed ofi_z snapped to the bar preceding the headline.
-#   A proper lagged-window OFI requires raw LOB data; wire here when available.
-#   Until then, ofi_z is used as a proxy for the [t, t+delta] window.
-
-# TODO(schema): return over [t+delta, t+delta+h] — the panel has ret_1m/5m/15m
-#   measured from bar_time, not from bar_time+delta.  Recompute when delta > 0.
+# Verified panel column names
+_OFI_COL = "ofi_z"
+_TS_COL  = "timestamp"
+_DAY_COL = "bar_time"
 
 
-def _hinge(sent: pd.Series):
-    """Split sentiment into positive and negative parts."""
+def _hinge(sent: pd.Series) -> tuple[pd.Series, pd.Series]:
+    """sent_pos = max(sent, 0), sent_neg = min(sent, 0)."""
     return sent.clip(lower=0), sent.clip(upper=0)
 
 
-def _day_groups(panel: pd.DataFrame) -> pd.Series:
-    """Integer group labels for cluster-by-day."""
-    ts_col = _DAY_COL if _DAY_COL in panel.columns else _TS_COL
-    dates  = pd.to_datetime(panel[ts_col]).dt.date
+def _day_groups(df: pd.DataFrame) -> np.ndarray:
+    """Integer group labels (0-based) for each unique calendar day."""
+    col   = _DAY_COL if _DAY_COL in df.columns else _TS_COL
+    dates = pd.to_datetime(df[col]).dt.date
     codes, _ = pd.factorize(dates)
-    return pd.Series(codes, index=panel.index)
+    return codes
 
 
 def fit_conditional_ofi(
     panel: pd.DataFrame,
     horizon: int,
     delta: int = 0,
-    sentiment_col: str = "llm_score",
+    scorer: str = "llm_score",
 ) -> dict:
     """
     Fit the conditional-OFI regression for one return horizon.
 
     Parameters
     ----------
-    panel : aligned event-level panel (one row per news event)
-    horizon : forward return horizon in minutes (1, 5, or 15)
-    delta : separation window in minutes between OFI measurement and return
-            window start. delta=0 uses the pre-computed ofi_z directly.
-    sentiment_col : which sentiment score to use for the hinge split.
-                    Must be one of: lm_score, llm_score, finbert_score.
+    panel   : aligned event-level panel (one row per news event).
+              Required columns: ofi_z, {scorer}, ret_{horizon}m, bar_time.
+    horizon : forward return horizon in minutes (1, 5, or 15).
+    delta   : separation window in minutes between OFI measurement and the
+              start of the return window.
+              delta=0 — uses panel["ofi_z"] and panel["ret_{h}m"] directly;
+                        the pre-headline OFI bar and the h-minute return
+                        starting at bar_time are non-overlapping by construction.
+              delta>0 — return window shifts to [bar_time+delta, bar_time+delta+h].
+                        TODO(schema): requires raw LOB midprice recompute.
+    scorer  : sentiment column for the hinge split.
+              Primary: "llm_score".  Robustness: "lm_score", "finbert_score".
 
     Returns
     -------
-    dict with keys:
-        horizon, n, alpha, gamma, delta1, delta2, b_pos, b_neg,
-        se_b_pos, se_b_neg, wald_t, wald_p,
-        r2, aic,
-        hac_result    : statsmodels RegressionResultsWrapper (Newey-West HAC)
-        cluster_event : statsmodels result clustered by event index
-        cluster_day   : statsmodels result clustered by calendar day
+    dict with scalar keys:
+        horizon, delta, scorer, n,
+        alpha, gamma, delta1, delta2, b_pos, b_neg,
+        se_b_pos (HAC), se_b_neg (HAC), wald_t, wald_p,
+        r2, aic
+    and heavy objects:
+        hac_result, cluster_event, cluster_day
+        (excluded from fit_all_horizons DataFrame output)
     """
     ret_col = f"ret_{horizon}m"
-    req     = [_OFI_COL, sentiment_col, ret_col]
+    req     = [_OFI_COL, scorer, ret_col]
     df      = panel.dropna(subset=req).copy()
 
     if len(df) < 20:
-        return {"horizon": horizon, "n": len(df), "error": "insufficient data"}
+        return {"horizon": horizon, "delta": delta, "scorer": scorer,
+                "n": len(df), "error": "insufficient data"}
 
+    # ── delta handling ────────────────────────────────────────────────────────
     if delta != 0:
-        # TODO(schema): shift OFI window by delta minutes when raw LOB available.
-        pass
+        # TODO(schema): shift return window by delta minutes.
+        # Requires recomputing log(mid_{t+delta+h} / mid_{t+delta}) from the
+        # raw LOB midprice series.  Currently unavailable; delta=0 only.
+        raise NotImplementedError(
+            f"delta={delta} requires raw LOB midprice recompute — not yet wired. "
+            "Use delta=0 with the pre-computed ret_{h}m columns."
+        )
 
-    sent                  = df[sentiment_col]
-    sent_pos, sent_neg    = _hinge(sent)
-    ofi                   = df[_OFI_COL]
+    # ── Feature construction ──────────────────────────────────────────────────
+    ofi              = df[_OFI_COL]
+    sent             = df[scorer]
+    sent_pos, sent_neg = _hinge(sent)
 
     X = pd.DataFrame({
-        "const":    1.0,
-        "ofi":      ofi,
-        "sent_pos": sent_pos,
-        "sent_neg": sent_neg,
+        "const":     1.0,
+        "ofi":       ofi,
+        "sent_pos":  sent_pos,
+        "sent_neg":  sent_neg,
         "ofi_x_pos": ofi * sent_pos,
         "ofi_x_neg": ofi * sent_neg,
     }, index=df.index)
 
     y = df[ret_col]
 
-    # ── HAC (Newey-West) ──────────────────────────────────────────────────────
-    # Lags = floor(4*(T/100)^(2/9)) per Newey & West 1994
+    # ── OLS base fit ──────────────────────────────────────────────────────────
+    ols_base = OLS(y, X).fit()
+
+    # ── HAC (Newey-West) — lags per NW 1994: floor(4*(T/100)^(2/9)) ──────────
     nw_lags = max(1, int(np.floor(4 * (len(df) / 100) ** (2 / 9))))
-    ols_fit  = OLS(y, X).fit()
-    hac_fit  = ols_fit.get_robustcov_results(cov_type="HAC", maxlags=nw_lags)
+    hac_fit = ols_base.get_robustcov_results(cov_type="HAC", maxlags=nw_lags)
 
-    # ── Cluster by event (each row is one event) ──────────────────────────────
-    # Event clusters: row index as group
-    evt_groups = np.arange(len(df))
-    clust_evt  = ols_fit.get_robustcov_results(
-        cov_type="cluster", groups=evt_groups
+    # ── Cluster by event ──────────────────────────────────────────────────────
+    # Each row is one event; singleton clusters give White-like SEs here but
+    # retains the cluster-robust API for when multiple obs per event are added.
+    clust_evt = ols_base.get_robustcov_results(
+        cov_type="cluster", groups=np.arange(len(df))
     )
 
-    # ── Cluster by day ────────────────────────────────────────────────────────
-    day_groups = _day_groups(df).values
-    clust_day  = ols_fit.get_robustcov_results(
-        cov_type="cluster", groups=day_groups
+    # ── Cluster by calendar day ───────────────────────────────────────────────
+    clust_day = ols_base.get_robustcov_results(
+        cov_type="cluster", groups=_day_groups(df)
     )
 
-    # ── Wald test: b_pos == b_neg ─────────────────────────────────────────────
+    # ── Wald test: H0: b_pos == b_neg ─────────────────────────────────────────
     b_pos  = float(hac_fit.params.get("ofi_x_pos", np.nan))
     b_neg  = float(hac_fit.params.get("ofi_x_neg", np.nan))
     se_pos = float(hac_fit.bse.get("ofi_x_pos",    np.nan))
     se_neg = float(hac_fit.bse.get("ofi_x_neg",    np.nan))
-
-    # Simple Wald t-stat for difference (independent SEs; conservative)
-    wald_se = np.sqrt(se_pos**2 + se_neg**2 + 1e-14)
-    wald_t  = (b_pos - b_neg) / wald_se
-    from scipy.stats import t as t_dist
-    wald_p  = float(2 * t_dist.sf(abs(wald_t), df=hac_fit.df_resid))
+    wald_t = (b_pos - b_neg) / np.sqrt(se_pos**2 + se_neg**2 + 1e-14)
+    wald_p = float(2 * t_dist.sf(abs(wald_t), df=hac_fit.df_resid))
 
     return {
         "horizon":       horizon,
         "delta":         delta,
-        "sentiment_col": sentiment_col,
+        "scorer":        scorer,
         "n":             int(hac_fit.nobs),
         "alpha":         float(hac_fit.params.get("const",    np.nan)),
         "gamma":         float(hac_fit.params.get("ofi",      np.nan)),
@@ -157,17 +173,15 @@ def fit_conditional_ofi(
 def fit_all_horizons(
     panel: pd.DataFrame,
     delta: int = 0,
-    sentiment_col: str = "llm_score",
+    scorer: str = "llm_score",
     horizons: list[int] = [1, 5, 15],
 ) -> pd.DataFrame:
     """
-    Run fit_conditional_ofi for each horizon and collect scalar results.
-
-    Returns DataFrame excluding the heavy statsmodels result objects.
+    Run fit_conditional_ofi for each horizon and return scalar results only.
     """
     rows = []
     for h in horizons:
-        r = fit_conditional_ofi(panel, h, delta=delta, sentiment_col=sentiment_col)
+        r = fit_conditional_ofi(panel, h, delta=delta, scorer=scorer)
         rows.append({k: v for k, v in r.items()
                      if k not in ("hac_result", "cluster_event", "cluster_day")})
     return pd.DataFrame(rows)
