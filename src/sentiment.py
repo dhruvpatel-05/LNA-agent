@@ -111,6 +111,33 @@ def score_llm(headline: str) -> float:
         return 0.0
 
 
+def _score_llm_headlines(
+    headlines: pd.Series,
+    verbose: bool = True,
+    start: int = 0,
+    total: int | None = None,
+) -> list[float]:
+    """
+    Score a sequence of headlines with the LLM, deduplicating identical text.
+
+    `start` and `total` are only used for progress display when resuming.
+    """
+    cache: dict[str, float] = {}
+    scores: list[float] = []
+    total = len(headlines) if total is None else total
+
+    for i, hl in enumerate(headlines):
+        if hl not in cache:
+            cache[hl] = score_llm(hl)
+            time.sleep(LLM_DELAY)
+        scores.append(cache[hl])
+        current = start + i + 1
+        if verbose and current % 25 == 0:
+            print(f"  LLM: {current}/{total} scored")
+
+    return scores
+
+
 def score_all(df: pd.DataFrame, llm: bool = True, verbose: bool = True) -> pd.DataFrame:
     """
     Add lm_score and llm_score columns to a headlines DataFrame.
@@ -130,27 +157,21 @@ def score_all(df: pd.DataFrame, llm: bool = True, verbose: bool = True) -> pd.Da
 
     # LLM — Anthropic API
     if llm:
-        cache: dict[str, float] = {}
-        scores = []
-        total  = len(df)
-        for i, hl in enumerate(df["headline"]):
-            if hl not in cache:
-                cache[hl] = score_llm(hl)
-                time.sleep(LLM_DELAY)
-            scores.append(cache[hl])
-            if verbose and (i + 1) % 25 == 0:
-                print(f"  LLM: {i + 1}/{total} scored")
-        df["llm_score"] = scores
+        df["llm_score"] = _score_llm_headlines(df["headline"], verbose=verbose)
     else:
         df["llm_score"] = np.nan
 
     return df
 
 
+def _scored_path(ticker: str, suffix: str) -> Path:
+    return RESULTS / f"sentiment_{ticker}_{suffix}.csv"
+
+
 def save_scored(ticker: str, df: pd.DataFrame, suffix: str) -> Path:
     """Save scored headlines to results/sentiment_{ticker}_{suffix}.csv"""
     RESULTS.mkdir(exist_ok=True)
-    path = RESULTS / f"sentiment_{ticker}_{suffix}.csv"
+    path = _scored_path(ticker, suffix)
     df.to_csv(path, index=False)
     print(f"  Saved {len(df)} scored rows → {path}")
     return path
@@ -158,7 +179,7 @@ def save_scored(ticker: str, df: pd.DataFrame, suffix: str) -> Path:
 
 def load_scored(ticker: str, suffix: str) -> pd.DataFrame:
     """Load scored headlines saved by this module."""
-    path = RESULTS / f"sentiment_{ticker}_{suffix}.csv"
+    path = _scored_path(ticker, suffix)
     if not path.exists():
         raise FileNotFoundError(
             f"No scored file at {path}. "
@@ -169,7 +190,74 @@ def load_scored(ticker: str, suffix: str) -> pd.DataFrame:
     return df
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+def _headlines_match(scored_df: pd.DataFrame, headlines_df: pd.DataFrame) -> bool:
+    required = {"timestamp", "headline"}
+    if not required.issubset(scored_df.columns) or not required.issubset(headlines_df.columns):
+        return False
+    if len(scored_df) != len(headlines_df):
+        return False
+
+    scored_ts = pd.to_datetime(scored_df["timestamp"], errors="coerce").reset_index(drop=True)
+    head_ts   = pd.to_datetime(headlines_df["timestamp"], errors="coerce").reset_index(drop=True)
+    if not scored_ts.equals(head_ts):
+        return False
+
+    scored_hl = scored_df["headline"].astype(str).reset_index(drop=True)
+    head_hl   = headlines_df["headline"].astype(str).reset_index(drop=True)
+    return scored_hl.equals(head_hl)
+
+
+def ensure_scored(
+    ticker: str,
+    suffix: str,
+    headlines_df: pd.DataFrame,
+    llm: bool = True,
+    verbose: bool = True,
+) -> pd.DataFrame:
+    """
+    Reuse cached sentiment when compatible with the current headlines.
+
+    If `llm=True` and the cached file is only partially scored, resume only the
+    missing LLM rows instead of recomputing the whole dataset.
+    """
+    path = _scored_path(ticker, suffix)
+    if not path.exists():
+        return score_all(headlines_df, llm=llm, verbose=verbose)
+
+    cached = load_scored(ticker, suffix)
+    if not _headlines_match(cached, headlines_df):
+        print("  Existing sentiment cache does not match current headlines; recomputing")
+        return score_all(headlines_df, llm=llm, verbose=verbose)
+
+    if "lm_score" not in cached.columns or cached["lm_score"].isna().any():
+        cached["lm_score"] = headlines_df["headline"].apply(score_lm)
+
+    if not llm:
+        print(f"  Using existing sentiment: {path}")
+        return cached
+
+    if "llm_score" not in cached.columns:
+        cached["llm_score"] = np.nan
+
+    missing = cached["llm_score"].isna()
+    if not missing.any():
+        print(f"  Using existing sentiment: {path}")
+        return cached
+
+    remaining = int(missing.sum())
+    total     = len(cached)
+    completed = total - remaining
+    print(f"  Resuming LLM scoring from existing sentiment: {remaining} remaining")
+    cached.loc[missing, "llm_score"] = _score_llm_headlines(
+        cached.loc[missing, "headline"],
+        verbose=verbose,
+        start=completed,
+        total=total,
+    )
+    return cached
+
+
+# ── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Headline sentiment scoring — LNA-Agent")

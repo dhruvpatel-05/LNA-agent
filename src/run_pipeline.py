@@ -131,8 +131,8 @@ def run(
 
     # ── Stage 2: Sentiment ────────────────────────────────────────────────────
     with _Timer("Stage 2 — Sentiment scoring (sentiment.py)"):
-        from sentiment import score_all, save_scored
-        scored = score_all(hl_df, llm=llm, verbose=True)
+        from sentiment import ensure_scored, save_scored
+        scored = ensure_scored(ticker, suffix, hl_df, llm=llm, verbose=True)
         save_scored(ticker, scored, suffix)
         lm_nonzero = scored["lm_score"].ne(0).sum()
         print(f"  LM nonzero scores : {lm_nonzero}/{len(scored)}")
@@ -186,7 +186,7 @@ def run(
     print(f"  Outputs    :")
     for name in [
         f"data/news/processed/{ticker}_headlines_{suffix}.csv",
-        f"results/sentiment_{ticker}_{suffix}.csv",
+        f"results/sentiment/sentiment_{ticker}_{suffix}.csv",
         f"results/aligned_{ticker}_{suffix}.parquet",
         f"results/ic_table_{ticker}_{suffix}.csv",
         f"results/ic_comparison_{ticker}_{suffix}.png",

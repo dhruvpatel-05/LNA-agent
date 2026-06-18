@@ -101,6 +101,42 @@ def compute_ic_table(aligned_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def agreement_ic(aligned_df: pd.DataFrame, sentiment_col: str, horizon: int = 1) -> dict:
+    """
+    Spearman IC of `sentiment_col` vs ret_{horizon}m, split by whether the
+    sentiment sign agrees ("confirmed") or disagrees ("conflicted") with
+    sign(ofi_z). Rows where either sign is zero are excluded from both.
+
+    Returns dict with keys "unconditional", "confirmed", "conflicted", each
+    mapping to {"ic", "pval", "n"}.
+    """
+    ret_col = f"ret_{horizon}m"
+    df = aligned_df[[sentiment_col, "ofi_z", ret_col]].dropna()
+
+    out = {}
+    mask_uncond = df[sentiment_col].notna() & df[ret_col].notna()
+    out["unconditional"] = _spearman_or_nan(df.loc[mask_uncond, sentiment_col],
+                                             df.loc[mask_uncond, ret_col])
+
+    sign_sent = np.sign(df[sentiment_col])
+    sign_ofi  = np.sign(df["ofi_z"])
+    agree     = (sign_sent != 0) & (sign_ofi != 0) & (sign_sent == sign_ofi)
+    conflict  = (sign_sent != 0) & (sign_ofi != 0) & (sign_sent != sign_ofi)
+
+    out["confirmed"]  = _spearman_or_nan(df.loc[agree, sentiment_col],   df.loc[agree, ret_col])
+    out["conflicted"] = _spearman_or_nan(df.loc[conflict, sentiment_col], df.loc[conflict, ret_col])
+
+    return out
+
+
+def _spearman_or_nan(x: pd.Series, y: pd.Series) -> dict:
+    n = int(len(x))
+    if n < 10:
+        return {"ic": np.nan, "pval": np.nan, "n": n}
+    ic, pval = spearmanr(x, y)
+    return {"ic": float(ic), "pval": float(pval), "n": n}
+
+
 def run_regression(
     aligned_df: pd.DataFrame,
     sentiment_col: str = "lm_score",

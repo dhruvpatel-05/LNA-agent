@@ -54,7 +54,7 @@ SCAN_WINDOW  = ("2016-01-01", "2020-12-31")   # default window shown in --scan
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _load_sentarl() -> tuple[pd.DataFrame, pd.Series]:
+def _load_sentarl() -> tuple[ pd.DataFrame, pd.Series]:
     """
     Load the full SentARL parquet and return (df, ef_parsed) where
     ef_parsed is a Series of already-decoded extra_fields dicts.
