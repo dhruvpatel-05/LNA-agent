@@ -1,0 +1,135 @@
+%% slides.tex — LNA-Agent: News-Conditional Intraday Alpha
+%% Math 285J Presentation (Beamer)
+
+\documentclass[aspectratio=169, 10pt]{beamer}
+
+%% ── Color theme (matches report.tex) ─────────────────────────────────────────
+\definecolor{lnaBlue}{HTML}{2E86AB}
+\definecolor{lnaPurple}{HTML}{A23B72}
+\definecolor{lnaOrange}{HTML}{F18F01}
+\definecolor{lnaRed}{HTML}{C73E1D}
+\definecolor{lnaDark}{HTML}{3B1F2B}
+
+\usecolortheme[named=lnaBlue]{structure}
+\setbeamercolor{alerted text}{fg=lnaRed}
+\setbeamercolor{example text}{fg=lnaPurple}
+\setbeamercolor{frametitle}{bg=lnaBlue, fg=white}
+\setbeamercolor{block title}{bg=lnaBlue!80, fg=white}
+
+\usetheme{Madrid}
+\useinnertheme{circles}
+\setbeamertemplate{navigation symbols}{}
+
+%% ── Packages ──────────────────────────────────────────────────────────────────
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+
+%% ── Title ─────────────────────────────────────────────────────────────────────
+\title[LNA-Agent]{News-Conditional Intraday Alpha}
+\subtitle{LLM Sentiment + LOB Order-Flow Confirmation}
+\author{Dhruv Patel}
+\institute{Math 285J — UCLA}
+\date{June 2026}
+
+%% ── Slides ────────────────────────────────────────────────────────────────────
+\begin{document}
+
+\begin{frame}
+\titlepage
+\end{frame}
+
+\begin{frame}{Outline}
+\tableofcontents
+\end{frame}
+
+\section{Motivation}
+\begin{frame}{Hypothesis}
+\begin{block}{Core idea}
+OFI reveals \emph{latent demand}; LLM sentiment reveals the
+\emph{direction} of a news shock.
+Their interaction should predict short-horizon returns better than either alone.
+\end{block}
+\vspace{1em}
+\[ \text{signal}_t = \text{OFI}_t \times \text{sent}_t \]
+Evaluated at 1, 5, 15-minute forward return horizons via Spearman IC.
+\end{frame}
+
+\section{Data}
+\begin{frame}{Data Sources}
+\begin{columns}
+\column{0.5\textwidth}
+\textbf{LOBSTER LOB (licensed)}
+\begin{itemize}
+  \item Level-2, 1-min snapshots
+  \item AAPL, JPM, AMD, QCOM, NFLX
+  \item 2019--2021
+\end{itemize}
+\column{0.5\textwidth}
+\textbf{News Headlines}
+\begin{itemize}
+  \item \textit{[source TBD]}
+  \item Snapped to preceding 1-min bar
+  \item 2-min backward tolerance
+\end{itemize}
+\end{columns}
+\end{frame}
+
+\section{Methodology}
+\begin{frame}{Sentiment Scorers}
+\begin{tabular}{lll}
+\toprule
+Scorer & Method & Speed \\
+\midrule
+LM & Loughran--McDonald lexicon & $<1$ ms \\
+FinBERT & \texttt{ProsusAI/finbert} & GPU batch \\
+\alert{LLM} & \texttt{claude-haiku-4-5-20251001} & $\sim$0.1 s/call \\
+\bottomrule
+\end{tabular}
+\vspace{0.5em}\\
+System prompt cached via \texttt{cache\_control: ephemeral}.
+\end{frame}
+
+\begin{frame}{Conditional OFI Regression}
+\[
+r_{t+h} = \alpha + \gamma\,\text{OFI} + \delta_1\,s^+ + \delta_2\,s^-
++ \beta^+(\text{OFI}\cdot s^+) + \beta^-(\text{OFI}\cdot s^-)
++ \varepsilon
+\]
+\begin{itemize}
+  \item $s^+ = \max(s,0)$, $s^- = \min(s,0)$ (hinge split)
+  \item Newey--West HAC SEs for overlapping labels
+  \item Wald test: $H_0\colon\beta^+=\beta^-$ (tone symmetry)
+\end{itemize}
+\end{frame}
+
+\section{Results}
+\begin{frame}{IC Table — Placeholder}
+\begin{center}
+\textit{[Table from Notebook 01 goes here]}
+\end{center}
+\end{frame}
+
+\begin{frame}{Placebo: Anonymization}
+\begin{center}
+\textit{[IC drop chart from Notebook 03 goes here]}
+\end{center}
+\end{frame}
+
+\section{Limitations \& Future Work}
+\begin{frame}{Limitations}
+\begin{itemize}
+  \item Small sample per ticker ($\sim$300 events)
+  \item News timestamp precision uncertain
+  \item No live execution; spread estimates from L1 only
+  \item LLM API cost limits scaling
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Thank You}
+\centering
+Code: \texttt{github.com/[repo]}\\[1em]
+Data: LOBSTER (\url{https://lobsterdata.com}) — licensed, not committed.
+\end{frame}
+
+\end{document}
