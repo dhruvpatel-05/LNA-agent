@@ -1,0 +1,80 @@
+\begin{table}[htbp]
+\centering
+\caption{Market-adjusted IC with BH FDR (q=0.05).}
+\label{tab:market_adjusted_ic_fdr}
+\begin{tabular}{lrrrrrrr}
+\toprule
+stock & signal & horizon & ic\_madj & p\_madj & n & p\_adj & reject\_fdr \\
+\midrule
+TSLA|unrelated & OFI×LLM & 15 & 0.1715 & 0.0510 & 147 & 0.6013 & False \\
+NVDA & LM & 1 & 0.0971 & 0.0210 & 865 & 0.6013 & False \\
+AAPL & OFI×LLM|confirmed & 5 & 0.1806 & 0.0610 & 167 & 0.6013 & False \\
+AMD & LLM & 15 & 0.1172 & 0.0560 & 264 & 0.6013 & False \\
+AMD|unrelated & OFI×LLM & 5 & 0.2581 & 0.0160 & 82 & 0.6013 & False \\
+TSLA & LLM & 1 & 0.1201 & 0.0570 & 395 & 0.6013 & False \\
+AAPL & LM & 5 & 0.1025 & 0.0490 & 502 & 0.6013 & False \\
+AMD & LLM & 5 & 0.1072 & 0.0770 & 271 & 0.6641 & False \\
+AMD|unrelated & OFI×LLM & 15 & 0.0608 & 0.3160 & 81 & 0.7590 & False \\
+AMD & OFI×LLM|confirmed & 1 & 0.0382 & 0.3920 & 92 & 0.7590 & False \\
+TSLA|unrelated & OFI×LLM & 5 & 0.1274 & 0.1010 & 150 & 0.7590 & False \\
+AMD & OFI×LLM|confirmed & 15 & 0.0382 & 0.3750 & 90 & 0.7590 & False \\
+META & OFI×LLM|confirmed & 5 & 0.1280 & 0.1820 & 140 & 0.7590 & False \\
+META & OFI×LLM|confirmed & 15 & 0.0855 & 0.2450 & 137 & 0.7590 & False \\
+TSLA & OFI×LLM|confirmed & 1 & 0.0309 & 0.4280 & 143 & 0.7590 & False \\
+AMD|macro & OFI×LLM & 1 & 0.1632 & 0.2570 & 27 & 0.7590 & False \\
+AMD|macro & OFI×LLM & 5 & 0.1018 & 0.3420 & 27 & 0.7590 & False \\
+AMD|sector & OFI×LLM & 1 & 0.1301 & 0.1610 & 73 & 0.7590 & False \\
+TSLA|sector & OFI×LLM & 5 & 0.0378 & 0.4210 & 64 & 0.7590 & False \\
+TSLA|macro & OFI×LLM & 5 & 0.1170 & 0.2470 & 55 & 0.7590 & False \\
+AMD|sector & OFI×LLM & 15 & 0.0580 & 0.3250 & 71 & 0.7590 & False \\
+AMD|unrelated & OFI×LLM & 1 & 0.0780 & 0.2900 & 82 & 0.7590 & False \\
+TSLA|direct & OFI×LLM & 15 & 0.0879 & 0.3890 & 119 & 0.7590 & False \\
+TSLA|direct & OFI×LLM & 1 & 0.1868 & 0.2860 & 125 & 0.7590 & False \\
+AMD|sector & OFI×LLM & 5 & 0.1444 & 0.1300 & 73 & 0.7590 & False \\
+AAPL & LM & 1 & 0.0663 & 0.1550 & 507 & 0.7590 & False \\
+AMD & OFI×LLM|confirmed & 5 & 0.1004 & 0.2190 & 92 & 0.7590 & False \\
+META & LLM & 5 & 0.0305 & 0.3030 & 439 & 0.7590 & False \\
+META & LM & 5 & 0.0312 & 0.2920 & 439 & 0.7590 & False \\
+AMD & LLM & 1 & 0.0711 & 0.1710 & 271 & 0.7590 & False \\
+AMD & LM & 15 & 0.0291 & 0.3440 & 264 & 0.7590 & False \\
+AMD & LM & 5 & 0.0259 & 0.3540 & 271 & 0.7590 & False \\
+NVDA & LLM & 1 & 0.0400 & 0.1890 & 865 & 0.7590 & False \\
+NVDA & LM & 15 & 0.0216 & 0.3240 & 846 & 0.7590 & False \\
+AAPL & LLM & 15 & 0.0239 & 0.3710 & 498 & 0.7590 & False \\
+NVDA & LLM & 15 & 0.0072 & 0.4180 & 846 & 0.7590 & False \\
+AAPL & LLM & 5 & 0.0348 & 0.3080 & 502 & 0.7590 & False \\
+AAPL & LM & 15 & 0.0171 & 0.4000 & 498 & 0.7590 & False \\
+NVDA & LLM & 5 & 0.0094 & 0.4290 & 858 & 0.7590 & False \\
+AMD|direct & OFI×LLM & 5 & 0.0133 & 0.4690 & 89 & 0.7893 & False \\
+TSLA|unrelated & OFI×LLM & 1 & 0.0155 & 0.4640 & 150 & 0.7893 & False \\
+TSLA|sector & OFI×LLM & 15 & 0.0152 & 0.4820 & 63 & 0.7919 & False \\
+TSLA & OFI×LLM|confirmed & 5 & 0.0003 & 0.5010 & 143 & 0.8039 & False \\
+AMD|macro & OFI×LLM & 15 & -0.0246 & 0.5600 & 27 & 0.8136 & False \\
+AMD|direct & OFI×LLM & 1 & -0.0379 & 0.5520 & 89 & 0.8136 & False \\
+TSLA & LM & 15 & -0.0076 & 0.5660 & 382 & 0.8136 & False \\
+AAPL & OFI×LLM|confirmed & 15 & -0.0157 & 0.5560 & 163 & 0.8136 & False \\
+META & OFI×LLM|confirmed & 1 & -0.0088 & 0.5220 & 142 & 0.8136 & False \\
+TSLA|macro & OFI×LLM & 1 & -0.0275 & 0.5820 & 55 & 0.8196 & False \\
+TSLA & LM & 1 & -0.0163 & 0.6090 & 395 & 0.8404 & False \\
+META & LLM & 15 & -0.0212 & 0.6250 & 433 & 0.8413 & False \\
+AMD|direct & OFI×LLM & 15 & -0.0785 & 0.6340 & 85 & 0.8413 & False \\
+TSLA|direct & OFI×LLM & 5 & -0.1253 & 0.6610 & 123 & 0.8605 & False \\
+META & LLM & 1 & -0.0425 & 0.7490 & 442 & 0.9526 & False \\
+NVDA & OFI×LLM|confirmed & 5 & -0.0608 & 0.8100 & 361 & 0.9526 & False \\
+TSLA & LLM & 5 & -0.0725 & 0.8080 & 392 & 0.9526 & False \\
+META & LM & 15 & -0.0549 & 0.7780 & 433 & 0.9526 & False \\
+AMD & LM & 1 & -0.0699 & 0.8240 & 271 & 0.9526 & False \\
+TSLA|sector & OFI×LLM & 1 & -0.2352 & 0.8470 & 65 & 0.9526 & False \\
+AAPL & OFI×LLM|confirmed & 1 & -0.1207 & 0.8370 & 169 & 0.9526 & False \\
+TSLA|macro & OFI×LLM & 15 & -0.1145 & 0.7630 & 53 & 0.9526 & False \\
+AAPL & LLM & 1 & -0.0664 & 0.8560 & 507 & 0.9526 & False \\
+META & LM & 1 & -0.0761 & 0.8920 & 442 & 0.9533 & False \\
+TSLA & OFI×LLM|confirmed & 15 & -0.1591 & 0.8980 & 136 & 0.9533 & False \\
+NVDA & LM & 5 & -0.0541 & 0.8900 & 858 & 0.9533 & False \\
+NVDA & OFI×LLM|confirmed & 15 & -0.0972 & 0.9190 & 353 & 0.9608 & False \\
+NVDA & OFI×LLM|confirmed & 1 & -0.1113 & 0.9380 & 363 & 0.9660 & False \\
+TSLA & LLM & 15 & -0.1294 & 0.9560 & 382 & 0.9701 & False \\
+TSLA & LM & 5 & -0.1371 & 0.9790 & 392 & 0.9790 & False \\
+\bottomrule
+\end{tabular}
+\end{table}

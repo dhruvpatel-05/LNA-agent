@@ -133,10 +133,16 @@ def join_l1_quotes(
 
         lob_reset = lob_df.reset_index()   # columns: lob_ts, ask, ask_size, bid, bid_size
 
+        # merge_asof requires both keys to be the same datetime dtype
+        left_merge = (
+            sub[[ts_col]].reset_index().rename(columns={"index": "_orig_idx"})
+        )
+        left_merge["_ts_dt"] = pd.to_datetime(left_merge[ts_col])
+
         merged = pd.merge_asof(
-            sub[[ts_col]].reset_index().rename(columns={"index": "_orig_idx"}),
+            left_merge.sort_values("_ts_dt"),
             lob_reset,
-            left_on=ts_col,
+            left_on="_ts_dt",
             right_on="lob_ts",
             direction="backward",
             tolerance=tol,

@@ -122,14 +122,21 @@ def fit_conditional_ofi(
 
     # ── OLS base fit ──────────────────────────────────────────────────────────
     ols_base = OLS(y, X).fit()
+    feat     = list(X.columns)
+
+    def _as_series(arr, fallback_index=feat) -> pd.Series:
+        """statsmodels may return ndarray or Series; normalise to Series."""
+        if isinstance(arr, pd.Series):
+            return arr
+        return pd.Series(arr, index=fallback_index)
 
     # ── HAC (Newey-West) — lags per NW 1994: floor(4*(T/100)^(2/9)) ──────────
     nw_lags = max(1, int(np.floor(4 * (len(df) / 100) ** (2 / 9))))
     hac_fit = ols_base.get_robustcov_results(cov_type="HAC", maxlags=nw_lags)
+    hac_p   = _as_series(hac_fit.params)
+    hac_se  = _as_series(hac_fit.bse)
 
     # ── Cluster by event ──────────────────────────────────────────────────────
-    # Each row is one event; singleton clusters give White-like SEs here but
-    # retains the cluster-robust API for when multiple obs per event are added.
     clust_evt = ols_base.get_robustcov_results(
         cov_type="cluster", groups=np.arange(len(df))
     )
@@ -140,10 +147,10 @@ def fit_conditional_ofi(
     )
 
     # ── Wald test: H0: b_pos == b_neg ─────────────────────────────────────────
-    b_pos  = float(hac_fit.params.get("ofi_x_pos", np.nan))
-    b_neg  = float(hac_fit.params.get("ofi_x_neg", np.nan))
-    se_pos = float(hac_fit.bse.get("ofi_x_pos",    np.nan))
-    se_neg = float(hac_fit.bse.get("ofi_x_neg",    np.nan))
+    b_pos  = float(hac_p.get("ofi_x_pos", np.nan))
+    b_neg  = float(hac_p.get("ofi_x_neg", np.nan))
+    se_pos = float(hac_se.get("ofi_x_pos", np.nan))
+    se_neg = float(hac_se.get("ofi_x_neg", np.nan))
     wald_t = (b_pos - b_neg) / np.sqrt(se_pos**2 + se_neg**2 + 1e-14)
     wald_p = float(2 * t_dist.sf(abs(wald_t), df=hac_fit.df_resid))
 
@@ -152,10 +159,10 @@ def fit_conditional_ofi(
         "delta":         delta,
         "scorer":        scorer,
         "n":             int(hac_fit.nobs),
-        "alpha":         float(hac_fit.params.get("const",    np.nan)),
-        "gamma":         float(hac_fit.params.get("ofi",      np.nan)),
-        "delta1":        float(hac_fit.params.get("sent_pos", np.nan)),
-        "delta2":        float(hac_fit.params.get("sent_neg", np.nan)),
+        "alpha":         float(hac_p.get("const",    np.nan)),
+        "gamma":         float(hac_p.get("ofi",      np.nan)),
+        "delta1":        float(hac_p.get("sent_pos", np.nan)),
+        "delta2":        float(hac_p.get("sent_neg", np.nan)),
         "b_pos":         b_pos,
         "b_neg":         b_neg,
         "se_b_pos":      se_pos,
