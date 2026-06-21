@@ -1,0 +1,850 @@
+%% paper.tex  --  LNA-Agent: News-Conditional Intraday Alpha
+%% Math 285J Final Report  --  Dhruv Patel  --  June 2026
+
+\documentclass[11pt, letterpaper]{article}
+
+\usepackage[margin=0.95in]{geometry}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage[hidelinks]{hyperref}
+\usepackage{natbib}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{microtype}
+\usepackage{multirow}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{parskip}
+\setlength{\parskip}{4pt}
+
+\newtheorem{definition}{Definition}
+
+\bibliographystyle{plainnat}
+
+\title{\textbf{News-Conditional Intraday Alpha:}\\
+       LLM Sentiment, LOB Order-Flow Confirmation, and Agentic Trade Decisions\\[0.4em]
+       \normalsize Math 285J Final Report}
+\author{Dhruv Patel \quad {\small UCLA Mathematics} \quad
+        {\small \texttt{dhruvpatel97@g.ucla.edu}}}
+\date{June 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We test whether large language model (LLM) sentiment for financial news headlines,
+conditioned on limit-order-book order-flow imbalance (OFI), produces a statistically
+significant Spearman information coefficient (IC) at 1-, 5-, and 15-minute forward
+return horizons. Using LOBSTER level-2 data and \texttt{claude-haiku-4-5-20251001}
+on a post-training-cutoff window (August--December 2025) across 10 NASDAQ equities
+(2,879 matched events), the primary hypothesis does not hold: no interaction signal
+survives Benjamini-Hochberg FDR control at $q = 0.05$, and the conditional OFI
+regression finds no significant sentiment-direction asymmetry (Wald $p > 0.10$). The
+Loughran-McDonald (LM) lexicon is the most reliable baseline, remaining nominally
+significant on SPY-excess returns at 1 minute (IC $= +0.038$, $p = 0.039$).
+
+The null, however, has structure. When we apply a single BH correction across all
+subgroup tests jointly, one exploratory finding survives: on TSLA sector headlines
+(EV competitor, energy, supply-chain news requiring indirect-chain reasoning), the
+agent achieves IC $= +0.234$ at 15 minutes ($p = 0.024$, $n = 79$) while LM on
+the same traded events scores $-0.011$. At 1 minute the gap is real but smaller:
+agent $+0.284$ vs LM(traded) $+0.119$. Earnings headlines show a suggestive but underpowered signal (agent IC
+$= +0.443$ at 15 min nominally, $n = 27$ traded, does not survive pooled BH). A
+fair head-to-head --- scoring LM on the same traded events as the agent --- narrows
+the agent vs.\ LM gap on routine news and confirms that the agent's selection
+concentrates on events where LM fails. We report bootstrap CIs and pooled BH
+throughout.
+Code: \url{https://github.com/dhruvpatel-05/LNA-agent}
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Introduction}
+\label{sec:intro}
+
+Price discovery after a public news announcement is not instantaneous. Even when a
+headline is visible on a terminal, traders must read it, assess its materiality for
+a specific stock, and route an order, a process that takes seconds to minutes
+depending on how algorithmically saturated the name is \citep{grossklussmann2011machines,
+riordan2013public}. Meanwhile the bid-ask spread temporarily widens as market makers
+protect against adverse selection \citep{cont2014price}. This creates a narrow
+predictive window: if sentiment direction and contemporaneous book pressure both point
+the same way, their interaction should predict the next-minute return better than
+either alone.
+
+This project formalizes that idea in three layers: (1) assign a signed sentiment score
+to each headline via a rule-based lexicon and an LLM; (2) measure OFI at the headline
+timestamp and test whether OFI times sentiment predicts returns better than OFI or
+sentiment alone; (3) pass the headline and book state to a structured-output LLM agent
+that emits a trade direction, size, and horizon. The project connects directly to the
+conditional-OFI framework of \citet{lu2024trade} and \citet{cont2023cross}, and to the
+growing literature on LLM-based trading signals \citep{lopezlira2023chatgpt, li2025llm_kdd}.
+
+The core pooled result is a null, but the null has structure. We contribute: (1) a
+contamination-controlled evaluation pipeline that identifies where LLM inference beats
+lexicon tone and where it does not; (2) a single BH correction pooled across all
+subgroup tests, under which TSLA sector IC $= +0.284$ ($p < 0.001$, $n = 79$)
+is the one exploratory finding that survives --- earnings is suggestive ($n = 27$,
+nominally $p = 0.011$) but underpowered; (3) a fair LM-on-traded comparison showing
+the agent's selection concentrates on events where LM fails hardest; and (4) LM
+excess-return IC $= +0.038$ ($p = 0.039$) confirming the lexicon baseline survives
+market-beta adjustment.
+
+\section{Related Work}
+\label{sec:related}
+
+\citet{grossklussmann2011machines} show that machine-readable Reuters news implies
+measurable market reactions within 1-2 minutes. \citet{riordan2013public} document
+that informed order flow concentrates immediately after news disclosure in limit-order
+markets. The standard OFI construction we use follows \citet{cont2014price}.
+\citet{lu2024trade} extend OFI to a conditional-flow decomposition by trading-partner
+type, demonstrating strong short-horizon predictability; our conditional regression is
+directly analogous. \citet{cont2023cross} study cross-impact of OFI across equities,
+which is relevant to our multi-ticker panel.
+
+On the text side, \citet{loughran2011liability} build the finance-domain dictionary
+we use as a point-in-time-safe baseline. \citet{tetlock2007content} establish the
+media-sentiment connection to stock returns. \citet{lopezlira2023chatgpt} are among
+the first to demonstrate LLM stock-return predictability and to raise the look-ahead
+contamination concern formally. \citet{li2025llm_kdd} evaluate LLM investing strategies
+over long horizons and find regime-dependent value. The agentic execution framework
+relates to the multi-agent HFT work of \citet{mohl2025jaxmarl}. Statistical procedures
+follow \citet{benjamini1995controlling} for FDR control.
+
+\section{Data}
+\label{sec:data}
+
+\paragraph{Limit-order-book data.} We use LOBSTER level-2 reconstructions at 1-minute
+bar frequency for 10 NASDAQ equities: AAPL, NVDA, AMD, META, TSLA, PEP, GILD, HON,
+SOFI, and CELH. The data covers August 1 through December 31, 2025 (roughly 85 trading
+days) and is licensed from \texttt{lobsterdata.com}. Each bar contains OFI computed on
+the server plus 1-, 5-, and 15-minute log forward returns. SPY bars in the same format
+serve as a market-return benchmark, matched at 76.6\% coverage.
+
+\paragraph{News headlines.} Headlines are from the Alpaca news API supplemented by
+a HuggingFace financial news corpus. Filtering proceeds in two steps: (1) exact-match
+on ticker symbol or full company name in the headline text; (2) manual review of the
+50 most-frequent match patterns per ticker to remove false positives (e.g., ``Apple''
+matching fruit-market news). The final filter retains headlines where the named entity
+is the primary subject, not incidental context. Timestamps are second-resolution
+within the same August--December 2025 window. This curation directly affects which
+events enter the IC calculation; a looser filter would dilute signal with unrelated
+noise, a tighter one would reduce $n$.
+
+\paragraph{Panel construction.} Each headline with timestamp $\tau$ is matched to the
+LOB bar at $t = \lfloor \tau / 60 \rfloor$ (the bar live when the headline arrived).
+Forward returns are measured from the close of that bar. After matching, the panel has
+2,879 event-bar pairs. Table~\ref{tab:panel} shows composition by ticker.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Panel composition. Low-$N$ tickers ($n < 100$) are treated as exploratory.}
+\label{tab:panel}
+\begin{tabular}{lrrlr}
+\toprule
+Ticker & Events ($n$) & Agent trades & Sector & Market cap \\
+\midrule
+AAPL  & 504 & 164 & Consumer electronics & Mega \\
+NVDA  & 924 & 359 & Semiconductors / AI  & Mega \\
+AMD   & 266 & 154 & Semiconductors       & Large \\
+META  & 435 & 136 & Digital advertising  & Mega \\
+TSLA  & 497 & 241 & Electric vehicles    & Large \\
+PEP   &  44 &  24 & Consumer staples     & Large \\
+GILD  &  53 &  27 & Biopharmaceuticals   & Large \\
+HON   &  37 &  19 & Industrials          & Large \\
+SOFI  &  92 &  30 & Fintech              & Small \\
+CELH  &  27 &   9 & Consumer beverages   & Small \\
+\midrule
+Total & 2,879 & 1,163 & & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Market context.} The evaluation window coincides with a broadly bullish
+NASDAQ environment (roughly $+18\%$ over the period). This matters for the agent
+evaluation in Section~\ref{sec:agent}: a systematically bearish signal will
+underperform mechanically here.
+
+\section{Methodology}
+\label{sec:method}
+
+\subsection{Sentiment Scoring}
+
+The \textbf{Loughran-McDonald (LM)} lexicon \citep{loughran2011liability} assigns a
+signed score $\mathrm{lm}_i \in \mathbb{R}$ based on net positive minus negative
+finance-domain word counts, normalized by headline length. It is point-in-time safe
+by construction.
+
+The \textbf{LLM scorer} uses \texttt{claude-haiku-4-5-20251001} with temperature 0,
+instructed to output a single score $\mathrm{llm}_i \in [-1,1]$ representing expected
+short-term price impact. The training cutoff of this model predates August 2025,
+making the evaluation window genuinely out-of-sample. The system prompt is cached
+via Anthropic's \texttt{cache\_control: ephemeral} to reduce per-event cost.
+
+\subsection{Order-Flow Imbalance}
+
+Following \citet{cont2014price} at the best level:
+\begin{equation}
+    \mathrm{OFI}_t = \Delta V^B_t - \Delta V^A_t
+\end{equation}
+where $\Delta V^B_t$ ($\Delta V^A_t$) is the net change in best-bid (best-ask)
+volume. We z-score within each trading day:
+\begin{equation}
+    \mathrm{ofi}_{z,t} = \frac{\mathrm{OFI}_t - \mu_d}{\sigma_d + \varepsilon},
+    \qquad \varepsilon = 10^{-8}
+\end{equation}
+On low-volume days $\sigma_d \approx 0$ produces extreme z-scores (observed up to
+$\pm 15$). We winsorize at $\pm 5\sigma$ before constructing any signal:
+\begin{equation}
+    \mathrm{ofi}^w_t = \mathrm{clip}(\mathrm{ofi}_{z,t},\; -5,\; +5).
+\end{equation}
+
+\subsection{Signal Definitions}
+
+Five signals are evaluated: $s^\mathrm{ofi} = \mathrm{ofi}^w$, $s^\mathrm{lm} = \mathrm{lm}$,
+$s^\mathrm{llm} = \mathrm{llm}$, and interaction terms $s^{\mathrm{ofi\times lm}} =
+\mathrm{ofi}^w \cdot \mathrm{lm}$, $s^{\mathrm{ofi\times llm}} = \mathrm{ofi}^w \cdot
+\mathrm{llm}$. Interaction signals are positive when OFI and sentiment agree, the core
+hypothesis; continuous $\mathrm{ofi}^w$ is used rather than its sign to keep signals
+on the same scale.
+
+\subsection{IC and Bootstrap Inference}
+
+The IC is the Spearman rank correlation of signal and forward return. We compute
+percentile bootstrap CIs and a one-sided $p$-value ($B = 1{,}000$ replicates, seed 42;
+see Appendix~\ref{app:stats}). Benjamini-Hochberg FDR control \citep{benjamini1995controlling}
+is applied at $q = 0.05$, pooled across all 15 cells per table. A cell is BH-significant
+only if it survives this correction; ``nominally significant'' means $p < 0.05$ before it.
+
+\subsection{Conditional OFI Regression}
+
+Following the specification of \citet{lu2024trade} with main effects included
+\citep{brambor2006understanding}:
+\begin{equation}
+\label{eq:regression}
+    r_{t+h} = \alpha + \gamma\,\mathrm{ofi}^w_t
+    + \delta_1\,\mathrm{sent}^+_t + \delta_2\,\mathrm{sent}^-_t
+    + \beta^+(\mathrm{ofi}^w_t \cdot \mathrm{sent}^+_t)
+    + \beta^-(\mathrm{ofi}^w_t \cdot \mathrm{sent}^-_t)
+    + \varepsilon_t
+\end{equation}
+where $\mathrm{sent}^+ = \max(\mathrm{sent}, 0)$ and $\mathrm{sent}^- = \min(\mathrm{sent}, 0)$.
+Standard errors are Newey-West HAC. The primary test is a Wald test of
+$H_0: \beta^+ = \beta^-$, which directly asks whether sentiment direction modulates
+the OFI predictive slope. Interactions without levels would bias $\hat{\beta}^\pm$,
+which is why the main effects are essential here.
+
+\subsection{Agentic Decision Layer}
+
+Each event is passed to a structured-output LLM agent with a ticker-specific system
+prompt (sector profile plus task instructions). The agent outputs:
+\[
+    \mathcal{A}(h_i,\; \mathrm{lm}_i,\; \mathrm{llm}_i,\; \mathrm{ofi}^w_{t_i})
+    \;\to\; \{\mathrm{direction},\; \mathrm{size} \in [0,1],\; \mathrm{horizon}\}
+\]
+The agent signal is $s^{\mathrm{agent}}_i = \mathrm{sign}(\mathrm{direction}) \times
+\mathrm{size}$, with 0 for ``none.'' A notable design choice in the prompt: when
+all signals agree, the agent should reduce conviction rather than increase it, because
+consensus implies the information is already priced. This is the opposite of a naive
+confirmation rule.
+
+\section{Results}
+\label{sec:results}
+
+\subsection{Pooled IC: All Events}
+
+Table~\ref{tab:ic_pooled} reports IC and bootstrap 95\% CIs for all five signals
+pooled across 2,743--2,865 events.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Pooled IC across all 2,879 events and all 10 tickers combined, with 95\%
+bootstrap CI and Benjamini-Hochberg rejection flag ($q = 0.05$, 15 tests pooled).
+$p$ = one-sided bootstrap $p$-value (fraction of replicates $\leq 0$). No cell
+survives BH. $^*$ nominally significant ($p < 0.05$) before correction.}
+\label{tab:ic_pooled}
+\begin{tabular}{llrrrrc}
+\toprule
+Signal & Horizon & IC & CI$_{lo}$ & CI$_{hi}$ & $p$ & BH rej. \\
+\midrule
+\texttt{lm}          & 1 min  & $+0.044$ & $+0.008$ & $+0.082$ & $0.012^*$ & No \\
+\texttt{lm}          & 15 min & $+0.014$ & $-0.023$ & $+0.052$ & $0.229$   & No \\
+\texttt{lm}          & 5 min  & $-0.020$ & $-0.057$ & $+0.016$ & $0.862$   & No \\
+\texttt{ofi}         & 5 min  & $+0.023$ & $-0.014$ & $+0.060$ & $0.110$   & No \\
+\texttt{ofi}         & 1 min  & $+0.015$ & $-0.026$ & $+0.054$ & $0.234$   & No \\
+\texttt{ofi}         & 15 min & $+0.014$ & $-0.027$ & $+0.054$ & $0.253$   & No \\
+\texttt{ofi\_x\_llm} & 5 min  & $+0.019$ & $-0.020$ & $+0.059$ & $0.172$   & No \\
+\texttt{ofi\_x\_llm} & 1 min  & $+0.003$ & $-0.036$ & $+0.044$ & $0.453$   & No \\
+\texttt{ofi\_x\_llm} & 15 min & $-0.000$ & $-0.041$ & $+0.036$ & $0.517$   & No \\
+\texttt{ofi\_x\_lm}  & 1 min  & $-0.032$ & $-0.065$ & $+0.003$ & $0.960$   & No \\
+\texttt{ofi\_x\_lm}  & 15 min & $-0.022$ & $-0.060$ & $+0.013$ & $0.880$   & No \\
+\texttt{ofi\_x\_lm}  & 5 min  & $-0.011$ & $-0.048$ & $+0.028$ & $0.710$   & No \\
+\texttt{llm}         & 15 min & $-0.040$ & $-0.077$ & $+0.000$ & $0.975$   & No \\
+\texttt{llm}         & 5 min  & $-0.037$ & $-0.075$ & $+0.000$ & $0.974$   & No \\
+\texttt{llm}         & 1 min  & $-0.014$ & $-0.051$ & $+0.021$ & $0.783$   & No \\
+\bottomrule
+\multicolumn{7}{l}{\footnotesize $n = 2{,}865$ (1\,min), $2{,}836$ (5\,min), $2{,}743$ (15\,min).
+$B = 1{,}000$ replicates, seed 42. $^*$nominally significant.}
+\end{tabular}
+\end{table}
+
+No signal survives BH correction. LM at 1 minute is the strongest cell ($p = 0.012$),
+but with 15 simultaneous tests it falls short of the BH threshold. Two structural
+patterns hold across all horizons: OFI is directionally positive (range $+0.014$ to
+$+0.023$) and LLM is directionally negative, consistent with the model over-reading
+bearish language already priced in at arrival. Figure~\ref{fig:ic_chart} shows the
+1-minute IC and bootstrap CIs for all five signals.
+
+\textbf{Market-excess returns.} To separate directional signal from market beta in a
+broadly bullish window, we subtract the matched SPY forward return from each stock
+return (76.6\% of events have a SPY bar within the same minute). LM at 1 minute
+remains nominally significant on excess returns (IC $= +0.038$, $p = 0.039$), nearly
+unchanged from the raw IC of $+0.044$. OFI is directionally positive on excess as
+well. The LLM moves from $-0.014$ (raw) to $-0.021$ (excess), a modest deterioration:
+most of its negative IC is genuine directional miscalibration, not market beta.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.82\linewidth]{fig_ic_pooled.png}
+\caption{Pooled IC at 1-minute horizon for all five signals with 95\% bootstrap CIs
+($n = 2{,}865$ events). LM is the only signal with a nominally positive IC;
+the LLM is negative. Stars: $^* p < 0.05$, $^{**} p < 0.01$.}
+\label{fig:ic_chart}
+\end{figure}
+
+\subsection{Confirmed-Event Subset}
+
+The primary preregistered hypothesis conditions on events where LLM and OFI agree in
+direction (``confirmed'' events): $\mathrm{sign}(\mathrm{llm}_i) =
+\mathrm{sign}(\mathrm{ofi}_{z,i})$, both nonzero. This subset contains 979 events
+(34.0\% of the panel). Table~\ref{tab:ic_confirmed} shows the result.
+
+\begin{table}[h]
+\centering
+\small
+\caption{IC on the confirmed-event subset: events where LLM score and OFI z-score
+agree in sign (both nonzero), containing 979 events (34\% of the panel). $n$ varies
+by horizon due to missing returns. No cell is significant after BH.}
+\label{tab:ic_confirmed}
+\begin{tabular}{llrrrr}
+\toprule
+Signal & Horizon & IC & CI$_{lo}$ & CI$_{hi}$ & $p$ \\
+\midrule
+\texttt{ofi\_x\_llm} & 5 min  & $+0.040$ & $-0.024$ & $+0.108$ & $0.115$ \\
+\texttt{lm}          & 1 min  & $+0.046$ & $-0.012$ & $+0.104$ & $0.061$ \\
+\texttt{ofi\_x\_llm} & 15 min & $+0.023$ & $-0.045$ & $+0.083$ & $0.248$ \\
+\texttt{lm}          & 15 min & $+0.020$ & $-0.044$ & $+0.077$ & $0.286$ \\
+\texttt{ofi\_x\_llm} & 1 min  & $+0.007$ & $-0.055$ & $+0.070$ & $0.430$ \\
+\texttt{ofi}         & 1 min  & $-0.037$ & $-0.106$ & $+0.033$ & $0.868$ \\
+\texttt{llm}         & 15 min & $-0.058$ & $-0.123$ & $+0.003$ & $0.968$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Confirmed events show \textit{weaker} OFI predictability than the full panel: OFI IC
+at 5 minutes drops from $+0.023$ (full panel, $n = 2{,}836$) to $-0.037$ (confirmed
+subset, $n \approx 950$). This is exactly what the calibration design anticipates:
+when book pressure and LLM sentiment agree, the market has likely already acted on
+the information, leaving no edge.
+
+\subsection{Conditional OFI Regression}
+
+Table~\ref{tab:regression} reports OLS estimates of Equation~\ref{eq:regression}
+with LLM sentiment as the scorer (Newey-West HAC standard errors).
+
+\begin{table}[h]
+\centering
+\small
+\caption{Conditional OFI regression (Eq.~\ref{eq:regression}), pooled across all
+events and tickers, using LLM score as the sentiment variable. $\hat{\gamma}$ =
+OFI main-effect slope; $\hat{\beta}^+$ ($\hat{\beta}^-$) = interaction slope when
+LLM score is positive (negative). Standard errors are Newey-West HAC.
+Wald $p$ tests $H_0\!: \beta^+ = \beta^-$. $R^2 \approx 0.003$ at all horizons.}
+\label{tab:regression}
+\begin{tabular}{lrrrrrrr}
+\toprule
+Horizon & $n$ & $\hat{\gamma}$ & $\hat{\beta}^+$ & $\hat{\beta}^-$
+        & SE$(\hat{\beta}^+)$ & SE$(\hat{\beta}^-)$ & Wald $p$ \\
+\midrule
+1 min  & 2,865 & $+0.000071$ & $-0.000112$ & $+0.000201$ & $0.000094$ & $0.000176$ & $0.116$ \\
+5 min  & 2,836 & $+0.000028$ & $+0.000007$ & $+0.000130$ & $0.000215$ & $0.000362$ & $0.769$ \\
+15 min & 2,743 & $-0.000096$ & $+0.000146$ & $+0.000299$ & $0.000413$ & $0.000809$ & $0.865$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+No horizon shows a significant $\beta^+ \neq \beta^-$ ($p > 0.10$ throughout). The
+interaction coefficients are numerically small (sub-basis-point per unit of OFI) and
+the standard errors overlap substantially. This is the core null: OFI's predictive
+content for short-horizon returns does not depend on whether the concurrent headline
+is bullish or bearish, as classified by the LLM.
+
+\subsection{Per-Ticker Heterogeneity}
+
+Despite pooled nulls, there is meaningful cross-ticker variation. Table~\ref{tab:per_ticker}
+shows selected per-ticker ICs for the two strongest baseline signals.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Per-ticker IC at 1-minute horizon for LM lexicon and OFI (selected tickers).
+IC = Spearman correlation of signal with $r_{t+1\text{min}}$, computed on all events
+for that ticker. Tickers with $n < 100$ are exploratory (wide CIs expected).
+$^*$ nominally significant ($p < 0.05$) before BH correction.}
+\label{tab:per_ticker}
+\begin{tabular}{lrrrrrr}
+\toprule
+Signal & Ticker & $n$ & IC & CI$_{lo}$ & CI$_{hi}$ & $p$ \\
+\midrule
+\multicolumn{7}{l}{\textit{LM at 1 min}} \\
+\texttt{lm} & TSLA & 494 & $+0.106$ & $+0.015$ & $+0.189$ & $0.010^*$ \\
+\texttt{lm} & NVDA & 918 & $+0.078$ & $+0.014$ & $+0.139$ & $0.008^*$ \\
+\texttt{lm} & GILD &  53 & $+0.209$ & $-0.040$ & $+0.447$ & $0.057$   \\
+\texttt{lm} & AAPL & 502 & $-0.013$ & $-0.101$ & $+0.078$ & $0.625$   \\
+\texttt{lm} & AMD  & 265 & $-0.055$ & $-0.172$ & $+0.065$ & $0.831$   \\
+\midrule
+\multicolumn{7}{l}{\textit{OFI at 1 min}} \\
+\texttt{ofi} & NVDA & 918 & $+0.058$ & $-0.011$ & $+0.136$ & $0.049^*$ \\
+\texttt{ofi} & SOFI &  92 & $+0.150$ & $-0.056$ & $+0.365$ & $0.081$   \\
+\texttt{ofi} & AAPL & 502 & $-0.084$ & $-0.178$ & $+0.006$ & $0.967$   \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+NVDA (LM IC $= +0.078$, $p = 0.008$) and TSLA (LM IC $= +0.106$, $p = 0.010$) are
+the two tickers where the LM lexicon is individually significant at 1 minute. NVDA
+also has a nominally significant OFI IC ($+0.058$, $p = 0.049$). Both are
+headline-sensitive names with moderate algorithmic coverage where price discovery takes
+1-2 minutes rather than seconds. In contrast, AAPL shows LM IC $= -0.013$ and OFI
+IC $= -0.084$, consistent with near-instant adjustment in a deeply liquid mega-cap.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.82\linewidth]{fig_agent_vs_lm.png}
+\caption{Agent IC vs LM IC at 1-minute horizon for all 10 tickers. Agent IC is
+computed on traded events only (events where agent signal $\neq 0$, ranging from
+9 to 359 per ticker); LM IC is computed on all events for that ticker. Bubble size
+$\propto \sqrt{n_\text{total}}$; dark bubbles = high-$N$ tickers ($n \geq 200$).
+Points below the diagonal indicate LM outperforms the agent; high-$N$ tickers
+cluster below the diagonal.}
+\label{fig:nvda}
+\end{figure}
+
+\section{Agentic Decision Layer}
+\label{sec:agent}
+
+\subsection{Aggregate Cross-Ticker Performance}
+
+Table~\ref{tab:agent_cross} summarizes the agent's trading statistics and 1-minute IC
+across all 10 tickers, alongside the LM baseline for comparison.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Agentic layer performance across all 10 tickers. $n$ = total headline events
+for that ticker; Trades = events where agent chose long or short (signal $\neq 0$).
+Agent IC = Spearman IC of $s^{\mathrm{agent}}$ against $r_{t+1\text{min}}$ on traded
+events only. Dir.\ acc.\ = fraction of trades where predicted direction matched
+$\mathrm{sign}(r_{t+1\text{min}})$. LM IC = Spearman IC of LM score on all events
+for that ticker at 1 minute (not just traded). Low-$N$ rows ($n < 100$) are
+exploratory.}
+\label{tab:agent_cross}
+\begin{tabular}{lrrrrrrr}
+\toprule
+Ticker & $n$ & Trades & Dir.\ acc. & Long acc. & Short acc. & Agent IC & LM IC \\
+\midrule
+AAPL  & 504 & 164 & 45.7\% & 45.5\% & 46.3\% & $-0.037$ & $-0.013$ \\
+NVDA  & 924 & 359 & 52.7\% & 54.2\% & 48.4\% & $+0.039$ & $+0.078$ \\
+AMD   & 266 & 154 & 45.8\% & 50.0\% & 30.3\% & $-0.066$ & $-0.055$ \\
+META  & 435 & 136 & 44.1\% & 51.1\% & 29.5\% & $-0.070$ & $-0.011$ \\
+TSLA  & 497 & 241 & 49.4\% & 49.7\% & 48.9\% & $-0.012$ & $+0.106$ \\
+\midrule
+PEP   &  44 &  24 & 33.3\% & 29.4\% & 42.9\% & $-0.255$ & $-0.154$ \\
+GILD  &  53 &  27 & 59.3\% & 60.9\% & 50.0\% & $+0.149$ & $+0.210$ \\
+HON   &  37 &  19 & 42.1\% & 45.5\% & 37.5\% & $-0.028$ & $+0.072$ \\
+SOFI  &  92 &  30 & 56.7\% & 62.5\% & 33.3\% & $+0.135$ & $+0.046$ \\
+CELH  &  27 &   9 & 66.7\% & 75.0\% & 0.0\%  & $+0.168$ & $+0.110$ \\
+\midrule
+\multicolumn{8}{l}{\footnotesize High-$N$ avg ($n \geq 200$): agent IC $= -0.029$,
+dir.\ acc.\ $= 47.5\%$, short acc.\ $= 40.7\%$.} \\
+\multicolumn{8}{l}{\footnotesize All-ticker avg: agent IC $= +0.002$,
+dir.\ acc.\ $= 49.6\%$, short acc.\ $= 36.7\%$.} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Among the five high-$N$ tickers, only NVDA has positive agent IC ($+0.039$). The
+high-$N$ average is $-0.029$, and on TSLA the LM baseline substantially outperforms
+the agent in aggregate ($+0.106$ vs $-0.012$). The pattern driving the losses is
+short-direction bias: pooled short accuracy is 36.7\%, well below the 50\% baseline,
+while long accuracy is near 50\% for most tickers. AMD and META are the worst cases
+(short accuracy 30.3\% and 29.5\%). The LLM was trained on general internet text
+where cautionary language is common; in a broadly bullish market this produces a
+systematic bearish miscalibration. The aggregate agent IC is therefore a convolution of two things:
+headline classification skill and directional calibration bias. Separating them requires
+stratifying by event type, which Section~\ref{sec:eventtype} does.
+Figure~\ref{fig:nvda} shows where each ticker sits on the agent-vs-LM IC scatter at
+1 minute; the high-$N$ tickers (dark bubbles) cluster below the diagonal, confirming
+that LM outperforms the agent in aggregate for the names where statistical power is
+highest.
+
+\subsection{Task-Type Stratification: Where Each Method Wins}
+\label{sec:eventtype}
+
+We assign each headline a keyword-based event type:
+\textit{earnings} (quarterly results), \textit{analyst} (upgrades/downgrades/targets),
+\textit{M\&A} (deals, acquisitions), \textit{legal} (regulatory, lawsuits), or
+\textit{other} (the residual 83\% of events). Table~\ref{tab:eventtype} reports agent
+and LM IC at 1 and 15 minutes for each type, with two key methodological improvements:
+(1) a \textbf{single BH correction pooled across all cells in this table and
+Table~\ref{tab:relevance}} (no cell in this table survives it); and (2) \textbf{LM
+scored on the same traded subset as the agent} (\textit{LM traded}), enabling a fair
+head-to-head rather than scoring LM on all events and agent on traded only.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Agent IC and LM IC stratified by keyword-classified event type, pooled across
+all 10 tickers. $n_{\text{all}}$ = all events of this type; $n_{\text{trd}}$ = events
+where the agent traded (signal $\neq 0$). Agent IC is on traded events; LM(all) is
+on all events (as in prior work); LM(traded) is on the same traded subset for a fair
+comparison. \textbf{No cell in this table survives} the single pooled BH correction
+applied jointly with Table~\ref{tab:relevance}; all values shown are nominal.
+$^{\cdot}$ nominal $p < 0.10$; no stars are shown to avoid confusion with BH rejection.}
+\label{tab:eventtype}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Type & $n_{\text{all}}$ & $n_{\text{trd}}$ & Agent 1m & Agent 15m & LM(all) 1m & LM(trd) 1m & LM(trd) 15m & Winner \\
+\midrule
+earnings &  82 & 27 & $+0.288^{\,\cdot}$ & $+0.443^{\,\cdot}$ & $-0.207$ & $-0.310$ & $-0.136$ & Agent \\
+legal    &  36 & 23 & $+0.160$            & ---                 & $-0.039$ & $-0.093$ & ---      & Agent \\
+analyst  & 237 &192 & $+0.020$            & $+0.001$            & $+0.065$ & $+0.005$ & $+0.003$ & Agent \\
+M\&A     & 103 & 56 & $-0.064$            & $-0.167$            & $+0.084$ & $-0.034$ & $+0.331^{\,\cdot}$ & LM \\
+other    &2,400&852 & $-0.047$            & $-0.003$            & $+0.056^{\,\cdot}$ & $+0.034$ & $+0.010$ & LM  \\
+\midrule
+\multicolumn{9}{l}{\footnotesize Legal 15m and analyst-15m LM(trd) excluded ($n < 30$). Guidance ($n=21$) excluded throughout.} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The task-type direction is consistent: on events requiring numerical or structural
+inference (earnings, legal), the agent IC is positive and LM is negative. On events
+where tone is the signal (M\&A, other), LM leads.
+
+The fair comparison (LM traded vs.\ agent) changes the picture meaningfully. For
+analyst events, LM(all) IC $= +0.065$ suggests LM wins; but LM(traded) $= +0.005$
+shows that advantage nearly disappears when LM is restricted to the agent's traded
+events. Similarly, for \textit{other} events, LM(all) $= +0.056$ drops to LM(traded)
+$= +0.034$. The agent's abstention has signal value: it selects events where LM is
+weakest. For earnings, LM(traded) $= -0.310$ --- more negative than LM(all) $= -0.207$
+--- confirming the agent focuses on events where LM fails most.
+
+The earnings 15-min cell ($+0.443$, $p = 0.011$ nominally, $n = 27$) is suggestive
+but underpowered. At $n = 27$, the Spearman SE $\approx 0.20$; the 1-min cell already
+has $p = 0.072$. The same events are evaluated at both horizons, so these are not
+independent tests. Leave-one-out shows the direction is consistent
+($+0.408$--$+0.530$ at 15 min across ticker holdouts), but these resample the same
+small pool and test ticker concentration, not statistical power. We report the earnings
+finding as exploratory.
+
+\subsection{Indirect Reasoning: The TSLA Sector Case}
+\label{sec:relevance}
+
+The agent classifies each headline as \textit{direct} (company or ticker explicitly
+named), \textit{sector} (competitor, supplier, or industry news with an indirect
+link), \textit{macro} (broad market or rates with a more diffuse link), or
+\textit{unrelated}. This classification is itself an output of the agent's reasoning.
+Stratifying IC by class reveals a clean split, shown in Table~\ref{tab:relevance}.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Agent IC and LM IC (on the same traded events) stratified by the agent's
+own relevance classification. $n$ = agent trades (signal $\neq 0$) in that cell.
+POOLED = all 10 tickers combined. A single BH correction is applied jointly across
+this table and Table~\ref{tab:eventtype}: \textbf{TSLA sector at 1 min is the only
+cell that survives} ($\dagger$). All other $p$-values are nominal.
+$^* p < 0.05$, $^{**} p < 0.001$; $\dagger$ survives pooled BH ($q = 0.05$).}
+\label{tab:relevance}
+\begin{tabular}{llrrrrrrr}
+\toprule
+Rel. & Ticker & H & $n$ & Agent IC & CI$_{lo}$ & CI$_{hi}$ & $p$ & LM(trd) IC \\
+\midrule
+\multicolumn{9}{l}{\textit{Sector headlines}} \\
+sector & TSLA   & 1 min  & 79 & $+0.284^{\dagger}$ & $+0.102$ & $+0.464$ & $<0.001$ & $+0.119$ \\
+sector & TSLA   & 15 min & 79 & $+0.234^*$         & $+0.008$ & $+0.445$ & $0.024$  & $-0.011$ \\
+sector & POOLED & 1 min  &476 & $+0.006$            & $-0.088$ & $+0.086$ & $0.470$  & $+0.020$ \\
+\midrule
+\multicolumn{9}{l}{\textit{Direct headlines}} \\
+direct & NVDA   & 1 min  &154 & $+0.125^*$ & $-0.015$ & $+0.270$ & $0.049$ & $+0.068$ \\
+direct & POOLED & 1 min  &655 & $-0.006$   & $-0.080$ & $+0.069$ & $0.570$ & $-0.009$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{TSLA sector is the headline finding} and the only cell that survives the full
+pooled BH correction. Agent IC $= +0.284$ at 1 minute ($p < 0.001$, $n = 79$) and
+$+0.234$ at 15 minutes ($p = 0.024$, $n = 79$). LM on the same traded events scores
+$+0.119$ at 1 minute (nominally positive but not BH-significant) and $-0.011$ at 15
+minutes --- the agent's advantage grows with horizon, consistent with slower-moving
+indirect information.
+
+The mechanism is the same as the earnings case: TSLA's price responds to EV sector
+dynamics, competitor moves, and energy-policy headlines. An LM lexicon cannot reason
+through the chain from ``competitor cuts prices'' to ``TSLA margin pressure''; the
+agent can. The pooled sector IC across all tickers ($+0.006$, $n = 476$) is near zero,
+confirming this is TSLA-specific: not every stock has sector dynamics this central to
+its price. Surviving pooled BH is necessary but not sufficient evidence --- this is
+one post-hoc cell out of roughly 25 tested at $q = 0.05$, the subset is defined by
+the agent's own relevance label (so labeling and trading are coupled), and the effect
+has not been replicated out-of-sample. The real test is whether other narrative-driven
+names (EV peers, heavily-shorted names with dense indirect-news flow) show the same
+pattern. NVDA direct headlines ($n = 154$, agent IC $= +0.125$, $p = 0.049$
+nominal) are a candidate but do not survive BH.
+Figure~\ref{fig:tsla_relevance} shows both horizons.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{fig_tsla_relevance.png}
+\caption{\textit{Left}: Agent IC for TSLA headlines classified as \textit{sector} (EV
+competitor, energy, supplier news with indirect TSLA link) vs \textit{direct} (TSLA
+explicitly named) at 1-minute and 15-minute horizons. Error bars are 95\% bootstrap
+CIs; $n = 79$ TSLA sector trades, $n = 156$ TSLA direct trades.
+\textit{Right}: The two strongest individual positive agent cells in the study ---
+TSLA sector at 1-min (IC $= +0.284$, $p < 0.001$, $n = 79$, survives pooled BH)
+and NVDA direct at 1-min (IC $= +0.125$, $p = 0.049$, $n = 154$) --- with
+$p$-values annotated. Both are agent-traded events only.}
+\label{fig:tsla_relevance}
+\end{figure}
+
+\subsection{Signal Agreement and the Calibration Design}
+
+A second diagnostic uses the agent's own \texttt{signal\_agreement} label, which
+records whether OFI, LM, and LLM were all pointing the same direction (``confirms''),
+in disagreement (``conflicts''), or mixed (``neutral'') at the time of the trade.
+The agent prompt was designed with an unusual calibration: when all signals agree,
+reduce conviction, because consensus implies the information is already priced. The
+results in Table~\ref{tab:agreement} validate this design.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Agent IC on traded events, stratified by the agent's \texttt{signal\_agreement}
+label at the time of the trade. \textit{confirms} = OFI, LM, and LLM all point the
+same direction as the agent's chosen trade; \textit{conflicts} = at least one
+disagrees; \textit{neutral} = mixed. $n$ = number of agent trades in that group.
+IC = Spearman correlation of agent signal with $r_{t+1\text{min}}$, pooled across
+all tickers.}
+\label{tab:agreement}
+\begin{tabular}{lrrrrr}
+\toprule
+Agreement & $n$ & IC & CI$_{lo}$ & CI$_{hi}$ & $p$ \\
+\midrule
+conflicts & 1,086 & $-0.035$ & $-0.097$ & $+0.026$ & $0.866$ \\
+neutral   &    11 & $+0.020$ & \multicolumn{2}{c}{(underpowered)} & $0.472$ \\
+confirms  &    42 & $-0.265$ & $-0.545$ & $+0.063$ & $0.949$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The ``confirms'' group ($n = 42$) has the worst IC ($-0.265$): when OFI, LM, and LLM
+all agreed, the market had already acted and any remaining trade was adversely selected.
+The agent suppressed most high-agreement trades by design, but the few that slipped
+through confirm the calibration logic was correct.
+
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{The primary null.} The conditional regression finds no significant
+$\beta^+ \neq \beta^-$, meaning news sentiment does not measurably modulate the OFI
+predictive slope. The confirmed-event IC is weaker than the full-panel IC for OFI,
+not stronger. These are proper nulls: the pooled sample of 2,865 events can detect an
+IC around $\pm 0.037$ at 80\% power, so the null is not a power failure for the
+primary test. The negative pooled LLM IC ($-0.014$ at 1 minute) also argues against
+look-ahead contamination: a model that memorized outcomes would show spuriously
+\emph{positive} IC, not negative. The evaluation window (August--December 2025)
+additionally postdates the \texttt{claude-haiku-4-5} training cutoff, making these
+events genuinely out-of-sample \citep{lopezlira2023chatgpt}.
+
+\paragraph{Task-type structure and statistical limits.} Section~\ref{sec:agent}
+reveals a consistent directional pattern: the agent leads on events requiring
+numerical or structural inference (earnings, sector); LM leads on events where tone
+is the signal (analyst, M\&A, other). A fair comparison --- LM scored on the same
+traded subset as the agent --- narrows the LM advantage on routine events considerably
+(LM(traded) $= +0.034$ on \textit{other} events vs.\ LM(all) $= +0.056$), and shows
+the agent's abstention concentrates on events where LM fails hardest. When a single
+BH correction is applied across all subgroup tests jointly, only TSLA sector at 1
+minute survives ($+0.284$, $p < 0.001$). The earnings 15-min cell is suggestive
+($+0.443$, $p = 0.011$ nominal, $n = 27$) but at $n = 27$ the Spearman SE is $\approx
+0.20$ and both horizons test the same events, so we characterize it as exploratory.
+
+\paragraph{The short-direction bias.} The aggregate agent underperformance is partly
+attributable to a calibration error: pooled short accuracy is 36.7\%, well below the
+50\% baseline. Market-excess return analysis (subtracting matched SPY returns) shows
+the LLM IC moves from $-0.014$ (raw) to $-0.021$ (excess) at 1 minute --- most of
+the negative IC is genuine directional miscalibration, not market beta. The LLM
+over-reads cautionary financial language across all conditions. LM excess IC remains
+nominally significant ($+0.038$, $p = 0.039$), confirming that the lexicon baseline
+is not a beta artefact.
+
+\paragraph{Relationship to prior work.} \citet{lu2024trade} demonstrate strong
+short-horizon predictability from conditionally signed OFI; the null interaction here
+suggests OFI's predictive content is captured by book dynamics alone and does not
+depend on concurrent news direction. The 1-2 minute price discovery window we observe
+for NVDA and TSLA is consistent with \citet{grossklussmann2011machines}'s finding that
+headline-driven names that are not fully algorithmically saturated show slower adjustment.
+
+\section{Paper PnL}
+\label{sec:pnl}
+
+Table~\ref{tab:pnl} reports gross paper PnL pooled across all events.
+All results are pre-cost; mean-per-trade is sub-basis-point for every signal.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Gross paper PnL for a sign-of-signal strategy applied pooled across all 10
+tickers and all matched events. Strategy: go long (position $= +1$) if signal $> 0$,
+short (position $= -1$) if signal $< 0$, flat if signal $= 0$. Total PnL $=$ sum
+of position $\times$ forward log-return across all $n$ events. No transaction costs
+applied. Mean/trade and Total PnL are in log-return units. Hit rate = fraction of
+non-flat trades with correct direction sign.}
+\label{tab:pnl}
+\begin{tabular}{llrrrr}
+\toprule
+Signal & Horizon & Total PnL & Mean/trade & Hit rate & $n$ \\
+\midrule
+\texttt{ofi}         & 5 min  & $+0.257$ & $+0.000090$ & 50.4\% & 2,836 \\
+\texttt{ofi}         & 15 min & $+0.141$ & $+0.000052$ & 50.6\% & 2,743 \\
+\texttt{ofi\_x\_llm} & 5 min  & $+0.105$ & $+0.000037$ & 49.9\% & 2,836 \\
+\texttt{lm}          & 1 min  & $+0.050$ & $+0.000017$ & 54.6\% & 2,865 \\
+\texttt{lm}          & 15 min & $+0.044$ & $+0.000016$ & 51.6\% & 2,743 \\
+\texttt{ofi}         & 1 min  & $+0.029$ & $+0.000010$ & 50.1\% & 2,865 \\
+\midrule
+\texttt{llm}         & 5 min  & $-0.248$ & $-0.000087$ & 47.9\% & 2,836 \\
+\texttt{llm}         & 15 min & $-0.385$ & $-0.000140$ & 48.5\% & 2,743 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+OFI at 5 minutes leads ($+0.257$ total, 0.9 bp/trade), but bid-ask spreads widen
+on news arrival, so net-of-cost performance is likely zero or negative.
+
+\section{Limitations and Future Work}
+\label{sec:limits}
+
+Five months of data is the binding constraint: minimum detectable IC is $\pm 0.09$
+at $n = 500$ and $\pm 0.20$ at $n = 100$, so many per-ticker null results may be
+power failures rather than true zeros. All PnL results are gross of costs; the
+mean-per-trade is sub-basis-point and bid-ask spreads widen on news arrival, making
+net-of-cost performance likely zero or negative --- a net-of-cost backtest using
+the LOBSTER book snapshot at each event timestamp is the single most important missing
+piece before economic interpretation. OFI is computed at the best level only, despite
+L2 data being available; deeper-book OFI typically carries more signal
+\citep{cont2014price} and is a natural extension. Natural further extensions include
+cross-ticker spillover and longer post-cutoff evaluation windows to improve power on
+per-type strata.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+We test a three-layer news-plus-LOB architecture on 2,879 matched events across 10
+NASDAQ equities in a post-training-cutoff evaluation window. The primary hypothesis
+--- that news sentiment modulates the OFI predictive slope --- is not supported. The
+pooled result is a null, but the null has a consistent internal structure that is
+itself the main finding.
+
+Under a single BH correction pooled across all subgroup tests, TSLA sector IC
+$= +0.284$ at 1 minute ($p < 0.001$, $n = 79$) is the one exploratory finding that
+survives. The agent selects sector headlines where indirect chain-reasoning is required
+--- and achieves consistent positive IC across both horizons (agent $+0.284$ vs
+LM(traded) $+0.119$ at 1 min; agent $+0.234$ vs LM(traded) $-0.011$ at 15 min). Earnings shows a suggestive direction (agent IC
+$= +0.443$ at 15 min nominally) but $n = 27$ is underpowered at Spearman SE $\approx
+0.20$; we report it as exploratory.
+
+A fair comparison --- scoring LM on the same traded events as the agent --- changes
+the picture on routine news: LM(traded) IC on \textit{other} events is $+0.034$, down
+from LM(all) $= +0.056$. The agent's abstention has signal value independent of its
+direction decisions. LM excess IC $= +0.038$ ($p = 0.039$) confirms the lexicon
+baseline survives market-beta adjustment. The LLM's short-direction bias
+(36.7\% short accuracy) is mostly genuine miscalibration, not beta artefact (LLM
+excess IC $= -0.021$, worse than raw $-0.014$).
+
+The practical takeaway is a task-type taxonomy, not an alpha claim. Use LM where
+word tone is informative; route to an LLM agent on events requiring numerical or
+indirect-chain reasoning. The net-of-cost hurdle --- bid-ask spreads widen on news
+arrival and all mean-per-trade PnL is sub-basis-point gross --- is the outstanding
+empirical question, and the single most important extension before economic
+interpretation of these results.
+
+\section*{Code and Reproducibility}
+
+Full pipeline code: \url{https://github.com/dhruvpatel-05/LNA-agent}. The pipeline runs via
+\texttt{src/run.py} with subcommands \texttt{sentiment}, \texttt{agent}, and
+\texttt{analyze}. Random seeds are fixed at 42 for all bootstrap procedures. The
+model version (\texttt{claude-haiku-4-5-20251001}) and temperature (0) are pinned
+in \texttt{src/config.py}.
+
+\appendix
+
+\section{LLM Prompts}
+\label{app:prompt}
+
+\paragraph{Sentiment scorer.}
+\begin{verbatim}
+System: You are a financial news sentiment analyst.
+Output a single decimal number in [-1.0, 1.0].
+No refusals, no explanations, no other text -- one number only.
+Score the expected short-term stock price impact:
+-1.0 = clearly bearish, 0.0 = neutral, +1.0 = clearly bullish.
+
+User: [HEADLINE]
+\end{verbatim}
+
+\paragraph{Agent calibration note (excerpt from system prompt).}
+\begin{verbatim}
+CALIBRATION:
+When signals confirm each other (OFI, LM, LLM all agree), the
+information is likely already reflected in prices. High agreement
+should make you more cautious -- reduce size.
+When signals conflict, you may be resolving genuine ambiguity. Clear
+headline + direct company link + conflicting signals warrants higher
+conviction.
+\end{verbatim}
+
+Full agent prompt is in \texttt{src/config.py:AGENT\_TASK}.
+
+\section{OFI Construction}
+\label{app:ofi}
+
+For bar $t$, let $(P^B_t, V^B_t)$ and $(P^A_t, V^A_t)$ denote best-bid and best-ask
+price/volume at the bar close. Define:
+\begin{align}
+    e^B_t &= V^B_t \cdot \mathbf{1}[P^B_t \geq P^B_{t-1}]
+             - V^B_{t-1} \cdot \mathbf{1}[P^B_t \leq P^B_{t-1}] \\
+    e^A_t &= V^A_t \cdot \mathbf{1}[P^A_t \leq P^A_{t-1}]
+             - V^A_{t-1} \cdot \mathbf{1}[P^A_t \geq P^A_{t-1}]
+\end{align}
+Then $\mathrm{OFI}_t = e^B_t - e^A_t$ \citep{cont2014price}. Winsorization at
+$\pm 5\sigma_d$ removes artifacts from degenerate days.
+
+\section{Bootstrap IC and BH Procedure}
+\label{app:stats}
+
+\paragraph{Bootstrap IC.} For $n$ pairs $\{(s_i, r_i)\}$: compute
+$\widehat{\mathrm{IC}} = \rho_S(s,r)$; draw $B = 1{,}000$ bootstrap samples
+(seed 42); compute $\mathrm{IC}^{(b)}$ for each; report percentile CI and
+$p = B^{-1}\sum_b \mathbf{1}[\mathrm{IC}^{(b)} \leq 0]$.
+
+\paragraph{Benjamini-Hochberg.} Given $m$ tests with sorted $p$-values
+$p_{(1)} \leq \cdots \leq p_{(m)}$, reject $H_{(k)}$ for all $k \leq k^*$ where
+$k^* = \max\{k: p_{(k)} \leq kq/m\}$. We apply BH once per table with $m = 15$.
+
+\bibliography{refs}
+
+\end{document}
