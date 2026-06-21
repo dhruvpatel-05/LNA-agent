@@ -11,15 +11,24 @@ signal alone. Tested via Spearman IC with bootstrap CIs and BH FDR correction.
 ## Repo layout
 
 ```
-src/              New research modules (stats_rigor, regression, costs, placebo, baselines)
-notebooks/        One notebook per finding (01–06)
-report/           report.tex (article) and slides.tex (beamer)
-results/
-  figures/        Saved plots
-  tables/         Saved CSV tables
-legacy/           Archived original pipeline code (reference only)
-  src/            Original ofi.py, align.py, sentiment.py, agent.py, …
-  tests/
+src/
+  config.py           Tickers, paths, model string, sector profiles, agent prompt
+  stats_rigor.py      Bootstrap IC, BH FDR correction, paired IC diff
+  run.py              CLI entry point (sentiment / agent / analyze subcommands)
+  data/               Panel assembly, OFI loading, sentiment loading, SPY merge
+  signals/            OFI×sentiment interaction signals, agent signal, rule signals
+  analysis/           IC tables, regression, PnL, agent deep-dives, rigor_fixes
+  baselines.py        LM / LLM scorer wrappers
+report/
+  paper.tex           Final paper (Math 285J)
+  refs.bib            Bibliography
+results_final/
+  fig_*.png           Paper figures
+  tables/             All output CSVs (IC, PnL, regression, event-type BH, excess IC)
+scripts/
+  fetch_alpaca_news.py  News headline fetcher
+legacy/             Archived original pipeline (reference only)
+data/               LOBSTER + news panels (licensed, not committed — see .gitignore)
 ```
 
 ## Data access (LOBSTER — licensed, not committed)
@@ -46,36 +55,16 @@ Requires Python ≥ 3.11.
 
 ## Run order
 
-See `run_all.sh` for the full ordered pipeline.  Quick start:
-
 ```bash
-# 1. Compute OFI for one ticker
-python legacy/src/ofi.py --batch AAPL \
-    --data-dir data/lobster/raw/AAPL \
-    --date-from 2019-01-01 --date-to 2020-12-31
+# 1. Score sentiment for all tickers
+python -m src.run sentiment
 
-# 2. Score headlines
-python legacy/src/sentiment.py --ticker AAPL \
-    --suffix 2019-01-01_2020-12-31
+# 2. Run agent on all tickers
+python -m src.run agent
 
-# 3. Align events to LOB bars
-python legacy/src/align.py --ticker AAPL \
-    --suffix 2019-01-01_2020-12-31
-
-# 4. Run notebooks in order
-jupyter notebook notebooks/
+# 3. Analyze: IC tables, BH correction, rigor fixes
+python -m src.run analyze
 ```
-
-## Notebooks
-
-| # | Notebook | Finding |
-|---|----------|---------|
-| 01 | `01_unconditional` | IC table, bootstrap CIs, FDR correction, IC decay |
-| 02 | `02_conditional_ofi` | Conditional OFI regression, Wald test |
-| 03 | `03_contamination_placebo` | Anonymization / shuffled-headline placebos |
-| 04 | `04_clean_window` | Snap-lag robustness, open/close filter |
-| 05 | `05_net_of_cost` | Gross vs net IC, event-level PnL |
-| 06 | `06_baselines` | Logistic, GBM, trivial anchors |
 
 ## Environment variables
 
