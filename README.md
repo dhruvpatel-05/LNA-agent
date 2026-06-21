@@ -3,11 +3,6 @@
 LLM sentiment (claude-haiku) + LOBSTER limit-order-book OFI confirmation.
 Math 285J final project, UCLA, June 2026.
 
-## Hypothesis
-
-`OFI_t × sent_t` predicts 1/5/15-minute forward returns better than either
-signal alone. Tested via Spearman IC with bootstrap CIs and BH FDR correction.
-
 ## Repo layout
 
 ```
