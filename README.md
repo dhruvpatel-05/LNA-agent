@@ -71,5 +71,5 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ## Citation
 
-Model: `claude-haiku-4-5-20251001` (Anthropic, 2025).
+Model: `claude-haiku-4-5-20251001` (Anthropic, 2026).
 LOB data: LOBSTER (<https://lobsterdata.com>).
